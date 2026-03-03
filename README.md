@@ -48,7 +48,7 @@ docmind/
 
 ## Setup Instructions
 1. Clone the repo
-   git clone https://github.com/YOUR_USERNAME/docmind.git
+   git clone https://github.com/chikkamathkartik/docmind.git
    cd docmind
 
 2. Create virtual environment
