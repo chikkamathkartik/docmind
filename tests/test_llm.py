@@ -1,3 +1,8 @@
+"""
+Day 3 - Script 1: Test Groq LLM Connection
+Run this with: python tests/test_llm.py
+"""
+
 import sys
 import os
 import time
