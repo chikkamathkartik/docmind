@@ -1,50 +1,93 @@
-# Docmind
-A production grade multi document RAG system built with Haystack, Qdrant, Groq, and RAGAS evaluation
-# DocMind — Intelligent Multi Document Research Assistant
+# DocMind — Agentic RAG Research Assistant
 
-A production grade RAG (Retrieval Augmented Generation) system that lets 
-users upload multiple documents and ask questions across all of them. 
-Built with Haystack 2.0, Qdrant, Groq (Llama 3.1 70B), and evaluated 
-with RAGAS.
+An intelligent multi-document research agent that uses the ReAct 
+(Reasoning + Acting) loop to answer questions. The agent decides 
+whether to search uploaded documents, search the web, summarize 
+content, or verify answers — dynamically choosing the right tool 
+for each question.
+
+## What Makes This Agentic
+
+Unlike standard RAG systems that follow fixed steps, DocMind uses 
+an AI agent that:
+- Thinks about the question before acting
+- Chooses from multiple tools dynamically
+- Can loop multiple times before answering
+- Shows its full reasoning trace to the user
+- Verifies its own answers for hallucinations
 
 ## Features
-- Multi document ingestion (PDF, TXT, DOCX)
+- Multi-document ingestion (PDF, TXT, DOCX)
 - Hybrid search (BM25 + Dense Retrieval)
-- Cross encoder reranking
-- Conversation memory
-- Confidence scores and hallucination detection
+- Cross-encoder reranking
+- Web search when documents are insufficient
+- Document summarization
+- Hallucination detection via Answer Verifier
+- Conversation memory across turns
+- Full agent reasoning trace visible in UI
 - RAGAS evaluation pipeline
 
+## Agent Tools
+
+- **Document Search** — searches uploaded documents via Qdrant
+- **Web Search** — searches internet via Serper API
+- **Summarizer** — summarizes entire documents on request
+- **Answer Verifier** — checks answers against source content
+
 ## Tech Stack
-- Pipeline: Haystack 2.0
-- Vector DB: Qdrant Cloud
-- LLM: Groq (Llama 3.1 70B) / Ollama (local)
-- Embeddings: all-MiniLM-L6-v2
-- Backend: FastAPI
-- Frontend: Streamlit
+| Component | Tool |
+|---|---|
+| Agent Framework | Haystack Agents + ReAct |
+| LLM (Agent Brain) | Groq — Llama 3.3 70B |
+| Embeddings | all-MiniLM-L6-v2 |
+| Vector DB | Qdrant Cloud |
+| Web Search | Serper API |
+| Reranker | cross-encoder/ms-marco |
+| Backend | FastAPI |
+| Frontend | Streamlit |
+| Evaluation | RAGAS |
+| Deployment | Streamlit Cloud |
 
 ## Project Structure
+```
 docmind/
 ├── backend/
-│   ├── main.py
+│   ├── main.py                    ← FastAPI app
+│   ├── agents/
+│   │   ├── rag_agent.py           ← Agent brain + ReAct loop
+│   │   └── agent_memory.py        ← Conversation memory
+│   ├── tools/
+│   │   ├── document_search.py     ← Tool 1
+│   │   ├── web_search.py          ← Tool 2
+│   │   ├── summarizer.py          ← Tool 3
+│   │   └── answer_verifier.py     ← Tool 4
 │   ├── pipeline/
-│   │   ├── indexing.py
-│   │   ├── retrieval.py
-│   │   └── haystack_config.py
+│   │   ├── indexing.py            ← Document ingestion
+│   │   ├── retrieval.py           ← Vector retrieval
+│   │   └── haystack_config.py     ← Haystack configs
 │   ├── core/
-│   │   ├── document_store.py
-│   │   └── embedder.py
+│   │   ├── document_store.py      ← Qdrant connection
+│   │   └── embedder.py            ← Embedding model
 │   └── utils/
-│       └── file_handler.py
+│       └── file_handler.py        ← File upload utilities
 ├── frontend/
-│   └── app.py
-├── data/sample_docs/
+│   └── app.py                     ← Streamlit UI
+├── data/
+│   └── sample_docs/               ← Test documents
 ├── tests/
+│   ├── test_chunking.py
+│   ├── test_embeddings.py
+│   ├── test_llm.py
+│   ├── test_qdrant.py
+│   ├── test_indexing.py
+│   ├── test_retrieval.py
+│   └── ragas_eval.py
 ├── configs/
 │   └── settings.py
 ├── .env.example
 ├── requirements.txt
 └── README.md
+```
 
 ## Setup Instructions
 1. Clone the repo
