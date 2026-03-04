@@ -13,6 +13,8 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "docmind")
 
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
+
 # Embedding model config
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL",
@@ -41,6 +43,8 @@ def validate_config():
         missing.append("QDRANT_URL")
     if not QDRANT_API_KEY:
         missing.append("QDRANT_API_KEY")
+    if not SERPER_API_KEY:
+        missing.append("SERPER_API_KEY")
     if missing:
         raise ValueError(
             f"Missing required environment variables: {', '.join(missing)}"
@@ -53,3 +57,4 @@ if __name__ == "__main__":
     print(f"Qdrant URL: {QDRANT_URL}")
     print(f"Collection: {COLLECTION_NAME}")
     print(f"Embedding Model: {EMBEDDING_MODEL}")
+    print(f"Serper API Key: {SERPER_API_KEY[:8]}..." if SERPER_API_KEY else "Serper API Key: NOT FOUND")
