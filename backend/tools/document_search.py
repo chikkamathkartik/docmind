@@ -1,3 +1,8 @@
+"""
+Tool 1: Document Search
+Uses the Haystack retrieval pipeline to search indexed documents.
+"""
+
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -10,107 +15,50 @@ from configs.settings import (
     TOP_K_RETRIEVAL
 )
 
+
 class DocumentSearchTool:
     """
-    Searches uploaded documents using vector similarity.
+    Searches uploaded documents using Haystack retrieval pipeline.
     This is Tool 1 in the agent's tool registry.
     """
 
     name = "document_search"
-    description = """Search through uploaded documents to find relevant 
-    information. Use this tool when the question is about content that 
-    might be in the user's documents. Input should be a search query string."""
+    description = """Search through uploaded documents to find relevant
+    information. Use this tool when the question is about content that
+    might be in the user's documents. Input should be a search query."""
 
     def __init__(self):
-        self.embedding_model = None
-        self.qdrant_client = None
+        self.document_store = None
         self._initialize()
-    
-    def use_haystack_store(self):
-        """ 
-        Switch to using Haystack document store.
-        Call this after documents have been indexed via the pipeline.
-        """
-        from backend.core.document_store import get_document_store
-        self.haystack_store = get_document_store()
-        print("Document search now using Haystack store")
 
     def _initialize(self):
-        """Load embedding model and connect to Qdrant."""
-        print("Initializing Document Search Tool...")
-
-        # load embedding model
-        from sentence_transformers import SentenceTransformer
-        self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-
-        # connect to Qdrant
-        from qdrant_client import QdrantClient
-        self.qdrant_client = QdrantClient(
-            url=QDRANT_URL,
-            api_key=QDRANT_API_KEY
-        )
-
-        print("Document Search Tool ready")
+        """Connect to Qdrant document store."""
+        from backend.core.document_store import get_document_store
+        self.document_store = get_document_store()
 
     def run(self, query: str) -> dict:
         """
         Search documents for the given query.
-        Returns top matching chunks with their sources.
+        Returns top matching chunks with scores.
         """
-        try:
-            # check if collection exists and has documents
-            collections = [
-                c.name for c in
-                self.qdrant_client.get_collections().collections
-            ]
+        from backend.pipeline.retrieval import retrieve_documents
 
-            if COLLECTION_NAME not in collections:
-                return {
-                    "success": False,
-                    "message": "No documents have been uploaded yet.",
-                    "results": []
-                }
-
-            # embed the query
-            query_embedding = self.embedding_model.encode([query])[0]
-
-            # search Qdrant
-            results = self.qdrant_client.query_points(
-                collection_name=COLLECTION_NAME,
-                query=query_embedding.tolist(),
-                limit=TOP_K_RETRIEVAL,
-                with_payload=True
-            )
-
-            # format results
-            formatted_results = []
-            for point in results.points:
-                formatted_results.append({
-                    "content": point.payload.get("content", ""),
-                    "source": point.payload.get("source", "unknown"),
-                    "page": point.payload.get("page", "N/A"),
-                    "score": round(point.score, 4)
-                })
-
-            return {
-                "success": True,
-                "query": query,
-                "results": formatted_results,
-                "total_found": len(formatted_results)
-            }
-
-        except Exception as e:
+        # check if any documents exist
+        if self.document_store.count_documents() == 0:
             return {
                 "success": False,
-                "message": f"Search failed: {str(e)}",
+                "message": "No documents uploaded yet.",
                 "results": []
             }
+
+        return retrieve_documents(query, self.document_store)
 
     def format_for_agent(self, query: str) -> str:
         """
         Run search and format results as text the agent can read.
-        This is what the agent actually sees as the tool output.
         """
+        from backend.pipeline.retrieval import format_results_for_llm
+
         result = self.run(query)
 
         if not result["success"]:
@@ -119,13 +67,22 @@ class DocumentSearchTool:
         if not result["results"]:
             return "No relevant documents found for this query."
 
-        # format as readable text for the agent
-        output = f"Found {result['total_found']} relevant chunks:\n\n"
-        for i, r in enumerate(result["results"]):
+        # add confidence warning if scores are low
+        top_score = result["results"][0]["score"] if result["results"] else 0
+        warning = ""
+        if top_score < 0.3:
+            warning = "⚠️ Low confidence — results may not be relevant.\n\n"
+
+        output = warning
+        output += f"Found {result['total_found']} relevant chunks "
+        output += f"in {result['time_taken']}s:\n\n"
+
+        for i, doc in enumerate(result["results"]):
             output += f"[Source {i+1}]\n"
-            output += f"File: {r['source']} | Page: {r['page']}\n"
-            output += f"Relevance Score: {r['score']}\n"
-            output += f"Content: {r['content']}\n"
+            output += f"File   : {doc['source']}\n"
+            output += f"Page   : {doc['page']}\n"
+            output += f"Score  : {doc['score']}\n"
+            output += f"Content: {doc['content']}\n"
             output += "-" * 40 + "\n"
 
         return output
@@ -134,7 +91,16 @@ class DocumentSearchTool:
 # quick test
 if __name__ == "__main__":
     tool = DocumentSearchTool()
-    print("\nTesting document search tool...")
-    print("Note: Returns empty if no documents uploaded to Qdrant yet\n")
-    result = tool.format_for_agent("What is machine learning?")
-    print(result)
+    print("Testing Document Search Tool\n")
+
+    queries = [
+        "What is Agentic RAG?",
+        "How does machine learning work?",
+    ]
+
+    for query in queries:
+        print(f"Query: {query}")
+        print("-" * 50)
+        result = tool.format_for_agent(query)
+        print(result[:500])
+        print()
