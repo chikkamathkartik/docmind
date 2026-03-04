@@ -98,11 +98,14 @@ def index_document(file_path: str, document_store) -> dict:
 
     try:
         pipeline.run({
-            "router": {
-            "sources": [file_path],
-            "meta": [{"file_name": Path(file_path).name, "source": Path(file_path).name}]
-        }
-    })
+    "router": {
+        "sources": [file_path],
+        "meta": [{
+            "file_name": Path(file_path).name,
+            "source": Path(file_path).name
+        }]
+    }
+})
 
         count_after = document_store.count_documents()
         chunks_created = count_after - count_before

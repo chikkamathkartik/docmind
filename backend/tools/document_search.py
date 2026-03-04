@@ -25,6 +25,15 @@ class DocumentSearchTool:
         self.embedding_model = None
         self.qdrant_client = None
         self._initialize()
+    
+    def use_haystack_store(self):
+        """ 
+        Switch to using Haystack document store.
+        Call this after documents have been indexed via the pipeline.
+        """
+        from backend.core.document_store import get_document_store
+        self.haystack_store = get_document_store()
+        print("Document search now using Haystack store")
 
     def _initialize(self):
         """Load embedding model and connect to Qdrant."""
