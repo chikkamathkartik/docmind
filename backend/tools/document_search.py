@@ -29,21 +29,24 @@ class DocumentSearchTool:
 
     def __init__(self):
         self.document_store = None
+        self.bm25_store = None
         self._initialize()
 
     def _initialize(self):
-        """Connect to Qdrant document store."""
+        """Connect to Qdrant document store and BM25 store."""
         from backend.core.document_store import get_document_store
+        from backend.core.bm25_store import BM25Store
+
         self.document_store = get_document_store()
+        self.bm25_store = BM25Store()
 
     def run(self, query: str) -> dict:
         """
-        Search documents for the given query.
-        Returns top matching chunks with scores.
+        Search documents using hybrid search.
+        Combines dense vector search with BM25 keyword search.
         """
-        from backend.pipeline.retrieval import retrieve_documents
+        from backend.pipeline.hybrid_search import hybrid_search
 
-        # check if any documents exist
         if self.document_store.count_documents() == 0:
             return {
                 "success": False,
@@ -51,41 +54,22 @@ class DocumentSearchTool:
                 "results": []
             }
 
-        return retrieve_documents(query, self.document_store)
+        return hybrid_search(query, self.document_store, self.bm25_store)
 
     def format_for_agent(self, query: str) -> str:
         """
-        Run search and format results as text the agent can read.
+        Run hybrid search and format results for agent.
         """
-        from backend.pipeline.retrieval import format_results_for_llm
+        from backend.pipeline.hybrid_search import format_hybrid_results_for_agent
 
-        result = self.run(query)
+        if self.document_store.count_documents() == 0:
+            return "No documents uploaded yet. Please upload documents first."
 
-        if not result["success"]:
-            return f"Document search failed: {result['message']}"
-
-        if not result["results"]:
-            return "No relevant documents found for this query."
-
-        # add confidence warning if scores are low
-        top_score = result["results"][0]["score"] if result["results"] else 0
-        warning = ""
-        if top_score < 0.3:
-            warning = "⚠️ Low confidence — results may not be relevant.\n\n"
-
-        output = warning
-        output += f"Found {result['total_found']} relevant chunks "
-        output += f"in {result['time_taken']}s:\n\n"
-
-        for i, doc in enumerate(result["results"]):
-            output += f"[Source {i+1}]\n"
-            output += f"File   : {doc['source']}\n"
-            output += f"Page   : {doc['page']}\n"
-            output += f"Score  : {doc['score']}\n"
-            output += f"Content: {doc['content']}\n"
-            output += "-" * 40 + "\n"
-
-        return output
+        return format_hybrid_results_for_agent(
+            query,
+            self.document_store,
+            self.bm25_store
+        )
 
 
 # quick test

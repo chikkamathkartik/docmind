@@ -106,6 +106,46 @@ def index_document(file_path: str, document_store) -> dict:
         }]
     }
 })
+            # also add to BM25 index
+        try:
+            from backend.core.bm25_store import BM25Store
+            from pathlib import Path
+
+            bm25_store = BM25Store()
+
+            # read the file content for BM25
+            if file_path.endswith(".txt"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            elif file_path.endswith(".pdf"):
+                import fitz
+                doc = fitz.open(file_path)
+                content = " ".join([page.get_text() for page in doc])
+                doc.close()
+            else:
+                content = ""
+
+            if content:
+                # split into chunks for BM25
+                chunk_size = 500
+                chunks = [
+                    content[i:i+chunk_size]
+                    for i in range(0, len(content), chunk_size)
+                ]
+                bm25_docs = [
+                    {
+                        "content": chunk,
+                        "source": Path(file_path).name,
+                        "page": i+1
+                    }
+                    for i, chunk in enumerate(chunks)
+                ]
+                bm25_store.add_documents(bm25_docs)
+                print(f"Added {len(bm25_docs)} chunks to BM25 index")
+
+        except Exception as e:
+            print(f"BM25 indexing warning: {e}")
+        
 
         count_after = document_store.count_documents()
         chunks_created = count_after - count_before
