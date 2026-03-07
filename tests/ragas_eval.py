@@ -158,10 +158,12 @@ def evaluate_pipeline():
                 chunk_scores.append(overlap)
             context_precision = sum(chunk_scores) / len(chunk_scores)
 
-        # 2. faithfulness — is answer grounded in context?
-        faithfulness = confidence.get(
-            "breakdown", {}
-        ).get("coverage_score", 0.0)
+        # 2. faithfulness — word overlap between answer and retrieved chunks
+        context_text = " ".join([
+            chunk.get("content", "")
+            for chunk in retrieved_chunks[:3]
+        ])
+        faithfulness = calculate_word_overlap(answer, context_text)
 
         # 3. answer relevancy — does answer match ground truth?
         answer_relevancy = calculate_word_overlap(answer, ground_truth)
