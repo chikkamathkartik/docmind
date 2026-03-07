@@ -346,6 +346,47 @@ if question:
                     for source in sources:
                         st.markdown(f"- {source}")
 
+            # show confidence score
+            confidence = result.get("confidence", {})
+            if confidence:
+                pct = confidence.get("percentage", 0)
+                label = confidence.get("label", "Unknown")
+                color = confidence.get("color", "orange")
+                warning = confidence.get("warning")
+                breakdown = confidence.get("breakdown", {})
+
+                color_emoji = {
+                    "green": "🟢",
+                    "orange": "🟡",
+                    "red": "🔴"
+                }
+                emoji = color_emoji.get(color, "⚪")
+
+                st.markdown(
+                    f"{emoji} **Confidence: {label} ({pct}%)**"
+                )
+
+                with st.expander("📊 Confidence Breakdown", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric(
+                            "Retrieval",
+                            f"{round(breakdown.get('retrieval_score', 0)*100)}%"
+                        )
+                    with col2:
+                        st.metric(
+                            "Grounding",
+                            f"{round(breakdown.get('coverage_score', 0)*100)}%"
+                        )
+                    with col3:
+                        st.metric(
+                            "Sources",
+                            f"{round(breakdown.get('source_agreement', 0)*100)}%"
+                        )
+
+                if warning:
+                    st.warning(warning)
+
             # show timing
             st.caption(
                 f"⏱️ {time_taken}s · {iterations} agent iterations"
@@ -358,7 +399,8 @@ if question:
                 "trace": trace,
                 "sources": sources,
                 "iterations": iterations,
-                "time_taken": time_taken
+                "time_taken": time_taken,
+                "confidence": result.get("confidence", {})
             })
 
         else:

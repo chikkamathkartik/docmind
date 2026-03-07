@@ -207,7 +207,8 @@ async def ask_question(request: QuestionRequest):
             "reasoning_trace": result["reasoning_trace"],
             "iterations": result["iterations"],
             "time_taken": result["time_taken"],
-            "sources": _extract_sources(result["reasoning_trace"])
+            "sources": _extract_sources(result["reasoning_trace"]),
+            "confidence": result.get("confidence", {})
         }
 
     except Exception as e:

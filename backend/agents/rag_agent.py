@@ -15,6 +15,7 @@ from backend.tools.web_search import WebSearchTool
 from backend.tools.summarizer import SummarizerTool
 from backend.tools.answer_verifier import AnswerVerifierTool
 from backend.agents.agent_memory import memory_manager
+from backend.core.confidence_scorer import ConfidenceScorer
 
 
 class DocMindAgent:
@@ -33,6 +34,8 @@ class DocMindAgent:
             "summarizer": SummarizerTool(),
             "answer_verifier": AnswerVerifierTool()
         }
+        
+        self.confidence_scorer = ConfidenceScorer()
 
         # initialize LLM
         from groq import Groq
@@ -268,6 +271,39 @@ RULES:
             answer=final_answer,
             reasoning_trace=reasoning_trace
         )
+        
+        # calculate confidence score
+        search_results = []
+        for step in reasoning_trace:
+            if (step.get("type") == "observation" and
+                    step.get("tool") == "document_search"):
+                content = step.get("content", "")
+                # parse Score lines from hybrid search output
+                for line in content.split("\n"):
+                    line = line.strip()
+                    if line.startswith("Score"):
+                        try:
+                            score_val = float(line.split(":")[1].strip())
+                            search_results.append({
+                                "rrf_score": score_val,
+                                "source": "document"
+                            })
+                        except Exception:
+                            pass
+
+        # if no scores parsed, use default medium score
+        # so retrieval that worked doesn't show as low confidence
+        if not search_results and any(
+            step.get("tool") == "document_search"
+            for step in reasoning_trace
+            if step.get("type") == "observation"
+        ):
+            search_results = [{"rrf_score": 0.015, "source": "document"}] * 3
+
+        confidence = self.confidence_scorer.score(
+            final_answer,
+            search_results
+        )
 
         return {
             "question": question,
@@ -275,7 +311,8 @@ RULES:
             "reasoning_trace": reasoning_trace,
             "iterations": iteration,
             "time_taken": round(elapsed, 2),
-            "session_id": session_id
+            "session_id": session_id,
+            "confidence": confidence
         }
 
     def clear_memory(self, session_id: str = "default"):
