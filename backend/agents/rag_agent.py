@@ -1,12 +1,11 @@
 """
-DocMind RAG Agent - The Brain
-Implements the ReAct (Reasoning + Acting) loop.
-The agent decides which tools to use based on the question.
+DocMind RAG Agent - Improved Brain
+Implements the ReAct loop with better tool selection
+and session memory support.
 """
 
 import sys
 import os
-import json
 import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -15,17 +14,19 @@ from backend.tools.document_search import DocumentSearchTool
 from backend.tools.web_search import WebSearchTool
 from backend.tools.summarizer import SummarizerTool
 from backend.tools.answer_verifier import AnswerVerifierTool
+from backend.agents.agent_memory import memory_manager
+
 
 class DocMindAgent:
     """
-    The main Agentic RAG agent.
-    Uses ReAct loop to answer questions using multiple tools.
+    Improved Agentic RAG agent with session memory
+    and smarter tool selection.
     """
 
     def __init__(self):
         print("Initializing DocMind Agent...")
 
-        # initialize all tools
+        # initialize tools
         self.tools = {
             "document_search": DocumentSearchTool(),
             "web_search": WebSearchTool(),
@@ -39,50 +40,49 @@ class DocMindAgent:
         self.model = LLM_MODEL
 
         # agent config
-        self.max_iterations = 5  # prevent infinite loops
-        self.conversation_history = []
+        self.max_iterations = 4
 
         print("DocMind Agent ready\n")
 
-    def _get_system_prompt(self) -> str:
-        """
-        The system prompt that defines the agent's behavior.
-        This is the most critical piece of the entire agent.
-        """
-        return """You are DocMind, an intelligent research assistant 
-that uses the ReAct (Reasoning + Acting) approach to answer questions.
+    def _get_system_prompt(self, memory_context: str = "") -> str:
+        """Improved system prompt with clearer instructions."""
+        base_prompt = """You are DocMind, an intelligent research \
+assistant using the ReAct approach.
 
-You have access to these tools:
-1. document_search - Search uploaded documents for relevant information
-2. web_search - Search the internet for current information
-3. summarizer - Summarize long documents or text
-4. answer_verifier - Verify if an answer is supported by sources
+AVAILABLE TOOLS:
+1. document_search - Search uploaded documents (USE FIRST for most questions)
+2. web_search - Search the internet (USE when documents lack the answer)
+3. summarizer - Summarize long text (USE when asked to summarize)
+4. answer_verifier - Verify answer accuracy (USE for important claims)
 
-To use a tool, respond in this EXACT format:
-THOUGHT: [your reasoning about what to do next]
-ACTION: [tool_name]
-INPUT: [your input to the tool]
+RESPONSE FORMAT - use EXACTLY one of these formats:
 
-When you have enough information to answer, respond in this EXACT format:
+Format A - To use a tool:
+THOUGHT: [your reasoning - which tool and why]
+ACTION: [exact tool name from list above]
+INPUT: [your search query or text]
+
+Format B - When you have the final answer:
 THOUGHT: [your final reasoning]
-FINAL ANSWER: [your complete answer with source citations]
+FINAL ANSWER: [complete answer with source citations]
 
-Rules:
-- Always start by thinking about which tool is most appropriate
-- Use document_search first for questions about uploaded documents
-- Use web_search when documents don't have the answer
-- Always verify important answers with answer_verifier
-- Never make up information - only use what tools return
-- Always cite your sources in the final answer
-- If no relevant information found anywhere, say so clearly"""
+RULES:
+- Always use document_search FIRST before web_search
+- Keep thoughts concise - one or two sentences maximum
+- If document_search returns low confidence, then try web_search
+- Always cite sources in your final answer
+- If nothing found anywhere, say so clearly
+- Never make up information"""
 
-    def _parse_agent_response(self, response: str) -> dict:
-        """
-        Parse the agent's response to extract thought, action, and input.
-        """
+        if memory_context:
+            base_prompt += f"\n\n{memory_context}"
+
+        return base_prompt
+
+    def _parse_response(self, response: str) -> dict:
+        """Parse agent response into structured format."""
         response = response.strip()
 
-        # check if this is a final answer
         if "FINAL ANSWER:" in response:
             thought = ""
             if "THOUGHT:" in response:
@@ -96,7 +96,6 @@ Rules:
                 "answer": answer
             }
 
-        # check if this is a tool call
         if "ACTION:" in response and "INPUT:" in response:
             thought = ""
             if "THOUGHT:" in response:
@@ -114,7 +113,7 @@ Rules:
                 "input": input_text
             }
 
-        # if format not recognized, treat as final answer
+        # default to final answer if format not recognized
         return {
             "type": "final",
             "thought": "",
@@ -122,12 +121,12 @@ Rules:
         }
 
     def _execute_tool(self, tool_name: str, tool_input: str) -> str:
-        """
-        Execute the specified tool with the given input.
-        Returns the tool output as a string.
-        """
+        """Execute a tool and return its output."""
+        tool_name = tool_name.strip().lower()
+
         if tool_name not in self.tools:
-            return f"Error: Tool '{tool_name}' not found. Available tools: {list(self.tools.keys())}"
+            available = list(self.tools.keys())
+            return f"Tool '{tool_name}' not found. Available: {available}"
 
         tool = self.tools[tool_name]
 
@@ -139,41 +138,40 @@ Rules:
             elif tool_name == "summarizer":
                 return tool.format_for_agent(tool_input)
             elif tool_name == "answer_verifier":
-                # for verifier, split input into answer and sources
                 return tool.format_for_agent(tool_input, [])
             else:
-                return f"Tool {tool_name} not implemented"
+                return f"Tool {tool_name} execution not implemented"
         except Exception as e:
-            return f"Tool execution error: {str(e)}"
+            return f"Tool error: {str(e)}"
 
-    def run(self, question: str) -> dict:
+    def run(self, question: str, session_id: str = "default") -> dict:
         """
-        Run the agent on a question using the ReAct loop.
-        Returns the final answer with full reasoning trace.
+        Run the agent on a question.
+        Uses session memory for conversation context.
         """
         print(f"\n{'='*60}")
-        print(f"Agent processing: {question}")
+        print(f"Question: {question}")
+        print(f"Session : {session_id}")
         print(f"{'='*60}\n")
 
         start_time = time.time()
 
-        # build messages for LLM
+        # get session memory
+        session = memory_manager.get_session(session_id)
+        memory_context = session.format_for_prompt(n=3)
+
+        # build messages
         messages = [
-            {"role": "system", "content": self._get_system_prompt()}
+            {
+                "role": "system",
+                "content": self._get_system_prompt(memory_context)
+            },
+            {
+                "role": "user",
+                "content": question
+            }
         ]
 
-        # add conversation history for memory
-        for turn in self.conversation_history[-3:]:
-            messages.append({"role": "user", "content": turn["question"]})
-            messages.append({
-                "role": "assistant",
-                "content": turn["answer"]
-            })
-
-        # add current question
-        messages.append({"role": "user", "content": question})
-
-        # reasoning trace - stores every thought and action
         reasoning_trace = []
         final_answer = None
         iteration = 0
@@ -183,18 +181,23 @@ Rules:
             iteration += 1
             print(f"--- Iteration {iteration} ---")
 
-            # get agent response
-            response = self.llm.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=800
-            )
+            try:
+                response = self.llm.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=600
+                )
+                agent_output = response.choices[0].message.content
 
-            agent_output = response.choices[0].message.content
-            parsed = self._parse_agent_response(agent_output)
+            except Exception as e:
+                print(f"LLM error: {e}")
+                final_answer = "I encountered an error. Please try again."
+                break
 
-            # log the thought
+            parsed = self._parse_response(agent_output)
+
+            # log thought
             if parsed["thought"]:
                 print(f"THOUGHT: {parsed['thought']}")
                 reasoning_trace.append({
@@ -203,10 +206,10 @@ Rules:
                     "content": parsed["thought"]
                 })
 
-            # if final answer reached
+            # final answer
             if parsed["type"] == "final":
                 final_answer = parsed["answer"]
-                print(f"\nFINAL ANSWER: {final_answer}")
+                print(f"FINAL ANSWER: {final_answer[:200]}...")
                 reasoning_trace.append({
                     "iteration": iteration,
                     "type": "final_answer",
@@ -214,13 +217,13 @@ Rules:
                 })
                 break
 
-            # if tool call
+            # tool call
             if parsed["type"] == "action":
-                tool_name = parsed["action"].strip()
-                tool_input = parsed["input"].strip()
+                tool_name = parsed["action"]
+                tool_input = parsed["input"]
 
                 print(f"ACTION: {tool_name}")
-                print(f"INPUT: {tool_input[:100]}...")
+                print(f"INPUT : {tool_input[:80]}...")
 
                 reasoning_trace.append({
                     "iteration": iteration,
@@ -229,9 +232,9 @@ Rules:
                     "input": tool_input
                 })
 
-                # execute the tool
+                # execute tool
                 observation = self._execute_tool(tool_name, tool_input)
-                print(f"OBSERVATION: {observation[:200]}...\n")
+                print(f"OBSERVATION: {observation[:150]}...\n")
 
                 reasoning_trace.append({
                     "iteration": iteration,
@@ -240,7 +243,7 @@ Rules:
                     "content": observation[:500]
                 })
 
-                # add to message history so agent sees the result
+                # add to message history
                 messages.append({
                     "role": "assistant",
                     "content": agent_output
@@ -250,53 +253,53 @@ Rules:
                     "content": f"OBSERVATION: {observation}"
                 })
 
-        # handle max iterations reached without final answer
+        # handle max iterations
         if not final_answer:
-            final_answer = """I was unable to find a complete answer 
-            within the allowed steps. Please try rephrasing your 
-            question or uploading more relevant documents."""
+            final_answer = (
+                "I was unable to find a complete answer. "
+                "Please try rephrasing your question."
+            )
 
         elapsed = time.time() - start_time
 
-        # save to conversation history
-        self.conversation_history.append({
-            "question": question,
-            "answer": final_answer
-        })
+        # save to session memory
+        session.add_turn(
+            question=question,
+            answer=final_answer,
+            reasoning_trace=reasoning_trace
+        )
 
         return {
             "question": question,
             "answer": final_answer,
             "reasoning_trace": reasoning_trace,
             "iterations": iteration,
-            "time_taken": round(elapsed, 2)
+            "time_taken": round(elapsed, 2),
+            "session_id": session_id
         }
 
-    def clear_memory(self):
-        """Clear conversation history."""
-        self.conversation_history = []
-        print("Conversation memory cleared")
+    def clear_memory(self, session_id: str = "default"):
+        """Clear memory for a specific session."""
+        memory_manager.clear_session(session_id)
+        print(f"Memory cleared for session: {session_id}")
 
 
-# test the agent
+# test
 if __name__ == "__main__":
     agent = DocMindAgent()
 
-    # test questions
-    test_questions = [
-        "What is Agentic RAG and how is it different from standard RAG?",
-        "What are the latest developments in AI in 2024?",
+    # test with session memory
+    session_id = "test_session"
+
+    questions = [
+        "What is Agentic RAG?",
+        "How is it different from standard RAG?",  # follow up question
     ]
 
-    for question in test_questions:
-        result = agent.run(question)
-
+    for question in questions:
+        result = agent.run(question, session_id=session_id)
         print(f"\n{'='*60}")
-        print("RESULT SUMMARY")
-        print(f"{'='*60}")
-        print(f"Question   : {result['question']}")
         print(f"Answer     : {result['answer'][:300]}...")
         print(f"Iterations : {result['iterations']}")
-        print(f"Time       : {result['time_taken']} seconds")
-        print(f"Steps taken: {len(result['reasoning_trace'])}")
+        print(f"Time       : {result['time_taken']}s")
         print()

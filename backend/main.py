@@ -198,7 +198,7 @@ async def ask_question(request: QuestionRequest):
 
     try:
         # run agent
-        result = agent.run(request.question)
+        result = agent.run(request.question,session_id=request.session_id or "default")
 
         return {
             "success": True,
@@ -215,12 +215,12 @@ async def ask_question(request: QuestionRequest):
 
 
 @app.post("/clear-memory")
-async def clear_memory():
-    """Clear agent conversation memory."""
-    agent.clear_memory()
+async def clear_memory(session_id: str = "default"):
+    """Clear agent conversation memory for a session."""
+    agent.clear_memory(session_id)
     return {
         "success": True,
-        "message": "Conversation memory cleared"
+        "message": f"Memory cleared for session: {session_id}"
     }
 
 
