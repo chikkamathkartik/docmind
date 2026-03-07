@@ -1,0 +1,67 @@
+{
+  "summary": {
+    "context_precision": 0.0581,
+    "faithfulness": 0.0,
+    "answer_relevancy": 0.3504,
+    "recall_at_3": 0.4,
+    "avg_response_time": 17.18,
+    "total_questions": 5
+  },
+  "individual_results": [
+    {
+      "question": "What is Agentic RAG?",
+      "answer": "Agentic RAG extends standard RAG by adding an autonomous agent layer that can decide which tools to ",
+      "context_precision": 0.0946,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.5,
+      "recall_at_3": 1.0,
+      "confidence_label": "Low",
+      "confidence_pct": 21.6,
+      "time_taken": 26.93
+    },
+    {
+      "question": "What is machine learning?",
+      "answer": "Machine learning is a subset of AI that provides systems the ability to automatically learn and impr",
+      "context_precision": 0.1344,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.7778,
+      "recall_at_3": 1.0,
+      "confidence_label": "Low",
+      "confidence_pct": 22.3,
+      "time_taken": 13.0
+    },
+    {
+      "question": "What is natural language processing?",
+      "answer": "Natural language processing (NLP) is a subfield of artificial intelligence (AI) that uses machine le",
+      "context_precision": 0.0062,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.1724,
+      "recall_at_3": 0.0,
+      "confidence_label": "Low",
+      "confidence_pct": 22.3,
+      "time_taken": 15.46
+    },
+    {
+      "question": "What is deep learning?",
+      "answer": "Deep learning is a subset of machine learning that utilizes multilayered neural networks to perform ",
+      "context_precision": 0.0551,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.1176,
+      "recall_at_3": 0.0,
+      "confidence_label": "Low",
+      "confidence_pct": 22.3,
+      "time_taken": 14.44
+    },
+    {
+      "question": "What is retrieval augmented generation?",
+      "answer": "Retrieval augmented generation (RAG) is a process that optimizes the output of a large language mode",
+      "context_precision": 0.0,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.1842,
+      "recall_at_3": 0.0,
+      "confidence_label": "Low",
+      "confidence_pct": 22.3,
+      "time_taken": 16.07
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 """
 Tool 4: Answer Verifier
-Checks whether the agent's answer is supported by 
-the retrieved source documents. Flags hallucinations.
+Checks if the generated answer is grounded in the retrieved context.
+Flags hallucinated claims not found in source documents.
 """
 
 import sys
@@ -10,169 +10,175 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from configs.settings import GROQ_API_KEY, LLM_MODEL
 
+
 class AnswerVerifierTool:
     """
-    Verifies that generated answers are grounded in sources.
+    Verifies that an answer is grounded in the retrieved context.
     This is Tool 4 in the agent's tool registry.
     """
 
     name = "answer_verifier"
-    description = """Verify whether an answer is supported by the 
-    source documents. Use this after generating an answer to check 
-    for hallucinations. Input should be the answer and sources 
-    combined as a string."""
+    description = """Verify if an answer is supported by the retrieved
+    documents. Use this tool when you want to check if your answer
+    is grounded in the source documents and not hallucinated.
+    Input should be: 'ANSWER: [answer] CONTEXT: [context]'"""
 
     def __init__(self):
         from groq import Groq
-        self.client = Groq(api_key=GROQ_API_KEY)
+        self.llm = Groq(api_key=GROQ_API_KEY)
         self.model = LLM_MODEL
 
-    def run(self, answer: str, sources: list) -> dict:
+    def run(self, answer: str, context_chunks: list) -> dict:
         """
-        Verify the answer against the provided sources.
-
-        answer: the generated answer string
-        sources: list of source chunks used to generate the answer
+        Verify an answer against context chunks.
+        Returns verification result with grounding score.
         """
-        try:
-            # combine sources into one block
-            sources_text = ""
-            for i, source in enumerate(sources):
-                if isinstance(source, dict):
-                    sources_text += f"Source {i+1}: {source.get('content', source)}\n"
-                else:
-                    sources_text += f"Source {i+1}: {source}\n"
+        if not answer or not context_chunks:
+            return {
+                "verified": False,
+                "grounding_score": 0.0,
+                "issues": ["No answer or context provided"],
+                "verdict": "Cannot verify"
+            }
 
-            verification_prompt = f"""You are a fact-checking assistant.
+        # build context string
+        context = "\n---\n".join([
+            chunk.get("content", "")
+            for chunk in context_chunks[:3]
+        ])
 
-Given the following SOURCE DOCUMENTS and an ANSWER, determine if 
-every claim in the answer is supported by the source documents.
+        prompt = f"""You are a fact checker. Check if the answer is 
+supported by the context. Be strict.
 
-SOURCE DOCUMENTS:
-{sources_text}
+CONTEXT:
+{context}
 
 ANSWER TO VERIFY:
 {answer}
 
 Respond in this exact format:
+GROUNDING: [0-100 score of how well answer is grounded in context]
 VERDICT: [SUPPORTED / PARTIALLY SUPPORTED / NOT SUPPORTED]
-CONFIDENCE: [HIGH / MEDIUM / LOW]
-UNSUPPORTED CLAIMS: [list any claims not found in sources, or 'None']
-EXPLANATION: [one sentence explanation]"""
+ISSUES: [list any claims in the answer not found in context, or NONE]
 
-            response = self.client.chat.completions.create(
+Your response:"""
+
+        try:
+            response = self.llm.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": verification_prompt
-                    }
-                ],
-                temperature=0,
-                max_tokens=300
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=200
             )
 
-            verification_text = response.choices[0].message.content
-
-            # parse the response
-            verdict = "UNKNOWN"
-            confidence = "LOW"
-            unsupported = "None"
-            explanation = ""
-
-            for line in verification_text.split("\n"):
-                if line.startswith("VERDICT:"):
-                    verdict = line.replace("VERDICT:", "").strip()
-                elif line.startswith("CONFIDENCE:"):
-                    confidence = line.replace("CONFIDENCE:", "").strip()
-                elif line.startswith("UNSUPPORTED CLAIMS:"):
-                    unsupported = line.replace(
-                        "UNSUPPORTED CLAIMS:", ""
-                    ).strip()
-                elif line.startswith("EXPLANATION:"):
-                    explanation = line.replace("EXPLANATION:", "").strip()
-
-            # determine if hallucination risk exists
-            is_hallucination = verdict in [
-                "PARTIALLY SUPPORTED",
-                "NOT SUPPORTED"
-            ]
-
-            return {
-                "success": True,
-                "verdict": verdict,
-                "confidence": confidence,
-                "unsupported_claims": unsupported,
-                "explanation": explanation,
-                "is_hallucination_risk": is_hallucination,
-                "full_verification": verification_text
-            }
+            result_text = response.choices[0].message.content.strip()
+            return self._parse_verification(result_text)
 
         except Exception as e:
             return {
-                "success": False,
-                "message": f"Verification failed: {str(e)}",
-                "is_hallucination_risk": False
+                "verified": False,
+                "grounding_score": 0.0,
+                "issues": [str(e)],
+                "verdict": "Verification failed"
             }
 
-    def format_for_agent(self, answer: str, sources: list) -> str:
-        """
-        Run verification and format result for agent.
-        """
-        result = self.run(answer, sources)
+    def _parse_verification(self, text: str) -> dict:
+        """Parse the LLM verification response."""
+        grounding_score = 0.5
+        verdict = "UNKNOWN"
+        issues = []
 
-        if not result["success"]:
-            return f"Verification failed: {result['message']}"
+        for line in text.split("\n"):
+            line = line.strip()
+            if line.startswith("GROUNDING:"):
+                try:
+                    grounding_score = float(
+                        line.split(":")[1].strip()
+                    ) / 100
+                except Exception:
+                    pass
+            elif line.startswith("VERDICT:"):
+                verdict = line.split(":", 1)[1].strip()
+            elif line.startswith("ISSUES:"):
+                issues_text = line.split(":", 1)[1].strip()
+                if issues_text.upper() != "NONE":
+                    issues = [issues_text]
 
-        # choose emoji based on verdict
-        if result["verdict"] == "SUPPORTED":
-            icon = "✅"
-        elif result["verdict"] == "PARTIALLY SUPPORTED":
-            icon = "⚠️"
+        return {
+            "verified": verdict == "SUPPORTED",
+            "grounding_score": round(grounding_score, 2),
+            "verdict": verdict,
+            "issues": issues
+        }
+
+    def format_for_agent(
+        self,
+        answer: str,
+        context_chunks: list
+    ) -> str:
+        """Format verification result for the agent."""
+        result = self.run(answer, context_chunks)
+
+        output = f"Verification Result:\n"
+        output += f"Verdict         : {result['verdict']}\n"
+        output += f"Grounding Score : {result['grounding_score']*100:.0f}%\n"
+
+        if result["issues"]:
+            output += f"Issues Found    : {', '.join(result['issues'])}\n"
         else:
-            icon = "❌"
+            output += f"Issues Found    : None\n"
 
-        output = f"\n{icon} Verification Result: {result['verdict']}\n"
-        output += f"Confidence: {result['confidence']}\n"
-
-        if result["unsupported_claims"] != "None":
-            output += f"Unsupported Claims: {result['unsupported_claims']}\n"
-
-        output += f"Explanation: {result['explanation']}\n"
-
-        if result["is_hallucination_risk"]:
-            output += "\nWARNING: This answer may contain information "
-            output += "not found in the source documents.\n"
+        if not result["verified"]:
+            output += (
+                "\n⚠️ Warning: Some claims may not be fully "
+                "supported by the source documents."
+            )
 
         return output
 
 
-# quick test
+# test
 if __name__ == "__main__":
     tool = AnswerVerifierTool()
-    print("Testing Answer Verifier Tool...\n")
 
-    # test 1 - answer that IS supported
-    print("Test 1: Answer that IS supported by sources")
-    print("-" * 50)
-    answer1 = "RAG combines retrieval with language models to generate accurate answers."
-    sources1 = [
+    print("Testing Answer Verifier")
+    print("=" * 60)
+
+    # test 1 — well grounded answer
+    context = [
         {
-            "content": """Retrieval Augmented Generation combines 
-            information retrieval with text generation to produce 
-            accurate grounded answers."""
+            "content": (
+                "Agentic RAG uses autonomous agents with tools "
+                "including document search and web search to "
+                "perform multi-step reasoning."
+            )
         }
     ]
-    print(tool.format_for_agent(answer1, sources1))
+    answer = (
+        "Agentic RAG uses autonomous agents that can use "
+        "document search and web search tools."
+    )
 
-    # test 2 - answer that is NOT supported
-    print("\nTest 2: Answer that is NOT supported by sources")
-    print("-" * 50)
-    answer2 = "RAG was invented by Google in 2019 and first used in Gmail."
-    sources2 = [
+    print("Test 1 — Well grounded answer:")
+    print(f"Answer : {answer}")
+    result = tool.format_for_agent(answer, context)
+    print(result)
+
+    # test 2 — hallucinated answer
+    context2 = [
         {
-            "content": """RAG is a technique for grounding language 
-            model responses in retrieved documents."""
+            "content": (
+                "Machine learning is a subset of AI that learns "
+                "patterns from data."
+            )
         }
     ]
-    print(tool.format_for_agent(answer2, sources2))
+    answer2 = (
+        "Machine learning was invented by Alan Turing in 1950 "
+        "at Cambridge University."
+    )
+
+    print("\nTest 2 — Potentially hallucinated answer:")
+    print(f"Answer : {answer2}")
+    result2 = tool.format_for_agent(answer2, context2)
+    print(result2)
