@@ -123,12 +123,19 @@ async def upload_document(file: UploadFile = File(...)):
         result = index_document(saved["file_path"], document_store)
 
         if not result["success"]:
-            # clean up saved file if indexing failed
             delete_upload(saved["file_path"])
             raise HTTPException(
                 status_code=500,
-                detail=f"Indexing failed: {result['message']}"
+                detail=f"Indexing failed: {result.get('message', 'Unknown error')}"
             )
+
+        # register document
+        from backend.utils.file_handler import register_document
+        register_document(
+            saved["file_id"],
+            file.filename,
+            result["chunks_created"]
+        )
 
         return {
             "success": True,
@@ -149,7 +156,8 @@ async def upload_document(file: UploadFile = File(...)):
 @app.get("/documents")
 async def list_documents():
     """List all uploaded documents."""
-    files = get_uploaded_files()
+    from backend.utils.file_handler import get_uploaded_files as get_registered
+    files = get_registered()
     return {
         "success": True,
         "documents": files,
@@ -167,10 +175,18 @@ async def clear_documents():
 
         # clear uploaded files
         import shutil
+        from backend.utils.file_handler import clear_registry
         upload_dir = "data/uploads"
         if os.path.exists(upload_dir):
             shutil.rmtree(upload_dir)
             os.makedirs(upload_dir)
+            
+        clear_registry
+        
+        #also clear BM25
+        from backend.core.bm25_store import BM25Store
+        bm25 = BM25Store()
+        bm25.clear()
 
         return {
             "success": True,

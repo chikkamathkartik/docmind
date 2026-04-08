@@ -65,6 +65,13 @@ def clear_document_store(store):
     print(f"Collection {COLLECTION_NAME} recreated fresh")
 
 
+def get_document_count(document_store) -> int:
+    """Return total number of chunks in the store."""
+    try:
+        return document_store.count_documents()
+    except Exception:
+        return 0
+
 # test connection
 if __name__ == "__main__":
     print("Testing Qdrant Document Store connection...")

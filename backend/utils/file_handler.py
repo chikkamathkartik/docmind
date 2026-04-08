@@ -1,58 +1,52 @@
 """
 File Handler Utility
-Handles file upload validation and temporary storage.
+Handles file upload validation, storage, and tracking.
 """
 
-import sys
 import os
-import shutil
 import uuid
+import json
 from pathlib import Path
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+UPLOAD_DIR = "data/uploads"
+REGISTRY_PATH = "data/document_registry.json"
 
-from configs.settings import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_MB
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 def validate_file(filename: str, file_size_bytes: int) -> dict:
-    """
-    Validate uploaded file extension and size.
-    Returns dict with success status and message.
-    """
-    # check extension
+    """Validate file extension and size."""
+    from configs.settings import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_MB
+
     ext = Path(filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         return {
             "valid": False,
-            "message": f"File type {ext} not allowed. Allowed types: {ALLOWED_EXTENSIONS}"
+            "message": f"File type '{ext}' not supported. Use PDF, TXT, or DOCX."
         }
 
-    # check size
     max_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
     if file_size_bytes > max_bytes:
         return {
             "valid": False,
-            "message": f"File too large. Maximum size: {MAX_FILE_SIZE_MB}MB"
+            "message": f"File too large. Maximum size is {MAX_FILE_SIZE_MB}MB."
         }
 
-    return {"valid": True, "message": "File is valid"}
+    if file_size_bytes == 0:
+        return {
+            "valid": False,
+            "message": "File is empty."
+        }
+
+    return {"valid": True, "message": "Valid"}
 
 
 def save_upload(file_content: bytes, filename: str) -> dict:
-    """
-    Save uploaded file to data/uploads directory.
-    Returns the saved file path and a unique file ID.
-    """
-    # create uploads directory if it doesn't exist
-    upload_dir = "data/uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-
-    # generate unique ID for this file
+    """Save uploaded file to disk with unique ID."""
     file_id = str(uuid.uuid4())[:8]
-    safe_filename = f"{file_id}_{filename}"
-    file_path = os.path.join(upload_dir, safe_filename)
+    safe_name = f"{file_id}_{filename}"
+    file_path = os.path.join(UPLOAD_DIR, safe_name)
 
-    # save file
     with open(file_path, "wb") as f:
         f.write(file_content)
 
@@ -60,13 +54,56 @@ def save_upload(file_content: bytes, filename: str) -> dict:
         "file_id": file_id,
         "file_path": file_path,
         "original_name": filename,
-        "saved_name": safe_filename,
-        "size_bytes": len(file_content)
+        "saved_name": safe_name,
+        "size_bytes": len(file_content),
+        "size_mb": round(len(file_content) / (1024 * 1024), 2)
     }
 
 
+def register_document(file_id: str, filename: str, chunks: int):
+    """Register an indexed document in the local registry."""
+    registry = load_registry()
+    registry[file_id] = {
+        "file_id": file_id,
+        "filename": filename,
+        "chunks": chunks,
+        "uploaded_at": __import__("time").time()
+    }
+    save_registry(registry)
+
+
+def load_registry() -> dict:
+    """Load document registry from disk."""
+    if os.path.exists(REGISTRY_PATH):
+        try:
+            with open(REGISTRY_PATH, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_registry(registry: dict):
+    """Save document registry to disk."""
+    os.makedirs("data", exist_ok=True)
+    with open(REGISTRY_PATH, "w") as f:
+        json.dump(registry, f, indent=2)
+
+
+def get_uploaded_files() -> list:
+    """Return list of all registered documents."""
+    registry = load_registry()
+    return list(registry.values())
+
+
+def clear_registry():
+    """Clear document registry."""
+    if os.path.exists(REGISTRY_PATH):
+        os.remove(REGISTRY_PATH)
+
+
 def delete_upload(file_path: str) -> bool:
-    """Delete an uploaded file."""
+    """Delete an uploaded file from disk."""
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -74,26 +111,3 @@ def delete_upload(file_path: str) -> bool:
         return False
     except Exception:
         return False
-
-
-def get_uploaded_files() -> list:
-    """List all uploaded files."""
-    upload_dir = "data/uploads"
-    if not os.path.exists(upload_dir):
-        return []
-
-    files = []
-    for filename in os.listdir(upload_dir):
-        filepath = os.path.join(upload_dir, filename)
-        files.append({
-            "filename": filename,
-            "filepath": filepath,
-            "size_bytes": os.path.getsize(filepath),
-            "size_mb": round(os.path.getsize(filepath) / (1024*1024), 2)
-        })
-
-    return files
-
-
-# create uploads directory on import
-os.makedirs("data/uploads", exist_ok=True)

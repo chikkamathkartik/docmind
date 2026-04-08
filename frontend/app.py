@@ -1,21 +1,16 @@
 """
-DocMind Frontend
-Streamlit UI for the Agentic RAG system.
+DocMind Frontend — Polished Version
+Clean UI with proper error handling and multi-document support.
 """
 
 import streamlit as st
 import requests
-import json
 import time
-
-# ─────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────
 
 API_URL = "http://localhost:8000"
 
 st.set_page_config(
-    page_title="DocMind — Agentic RAG",
+    page_title="DocMind",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -28,388 +23,306 @@ st.set_page_config(
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "uploaded_docs" not in st.session_state:
-    st.session_state.uploaded_docs = []
+if "session_id" not in st.session_state:
+    st.session_state.session_id = f"session_{int(time.time())}"
 
-if "agent_thinking" not in st.session_state:
-    st.session_state.agent_thinking = False
+if "uploaded_files_seen" not in st.session_state:
+    st.session_state.uploaded_files_seen = set()
 
 # ─────────────────────────────────────────
-# HELPER FUNCTIONS
+# API HELPERS
 # ─────────────────────────────────────────
 
-def check_api_health():
-    """Check if the backend is running."""
+def check_health():
     try:
-        response = requests.get(f"{API_URL}/health", timeout=3)
-        return response.status_code == 200
+        r = requests.get(f"{API_URL}/health", timeout=3)
+        return r.status_code == 200, r.json() if r.status_code == 200 else {}
     except Exception:
-        return False
+        return False, {}
 
-def upload_document(file):
-    """Upload a document to the backend."""
+
+def upload_doc(file):
     try:
-        files = {"file": (file.name, file.getvalue(), file.type)}
-        response = requests.post(
+        r = requests.post(
             f"{API_URL}/upload",
-            files=files,
+            files={"file": (file.name, file.getvalue(), file.type)},
             timeout=120
         )
-        return response.json()
+        return r.json()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-def ask_question(question: str):
-    """Send a question to the agent."""
+
+def ask(question, session_id):
     try:
-        response = requests.post(
+        r = requests.post(
             f"{API_URL}/ask",
-            json={"question": question},
+            json={"question": question, "session_id": session_id},
             timeout=120
         )
-        return response.json()
+        return r.json()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-def get_documents():
-    """Get list of uploaded documents."""
+
+def get_docs():
     try:
-        response = requests.get(f"{API_URL}/documents", timeout=10)
-        return response.json()
+        r = requests.get(f"{API_URL}/documents", timeout=10)
+        return r.json()
     except Exception:
-        return {"documents": [], "total_chunks": 0}
+        return {"documents": [], "total_chunks": 0, "total_files": 0}
 
-def clear_all_documents():
-    """Clear all documents from the system."""
+
+def clear_docs():
     try:
-        response = requests.delete(f"{API_URL}/documents", timeout=30)
-        return response.json()
+        r = requests.delete(f"{API_URL}/documents", timeout=30)
+        return r.json()
     except Exception as e:
         return {"success": False, "message": str(e)}
 
-def clear_memory():
-    """Clear agent conversation memory."""
-    try:
-        response = requests.post(f"{API_URL}/clear-memory", timeout=10)
-        return response.json()
-    except Exception as e:
-        return {"success": False, "message": str(e)}
 
-def get_confidence_color(score):
-    """Return color based on confidence score."""
-    if score >= 0.7:
-        return "🟢"
-    elif score >= 0.4:
-        return "🟡"
-    else:
-        return "🔴"
+def clear_mem():
+    try:
+        requests.post(
+            f"{API_URL}/clear-memory",
+            params={"session_id": st.session_state.session_id},
+            timeout=10
+        )
+    except Exception:
+        pass
 
 # ─────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────
 
 with st.sidebar:
-    st.title("🧠 DocMind")
+    st.markdown("## 🧠 DocMind")
     st.caption("Agentic RAG Research Assistant")
     st.divider()
 
-    # API health check
-    api_healthy = check_api_health()
-    if api_healthy:
-        st.success("✅ Backend Connected")
+    # health check
+    healthy, health_data = check_health()
+    if healthy:
+        st.success("Backend connected")
+        chunks = health_data.get("documents_indexed", 0)
+        if chunks > 0:
+            st.caption(f"{chunks} chunks indexed")
     else:
-        st.error("❌ Backend Offline")
-        st.info("Run: uvicorn backend.main:app --reload --port 8000")
+        st.error("Backend offline")
+        st.code("uvicorn backend.main:app --reload --port 8000")
         st.stop()
 
     st.divider()
 
-    # document upload section
-    st.subheader("📄 Upload Documents")
-    st.caption("Supported: PDF, TXT, DOCX (max 50MB)")
+    # upload section
+    st.markdown("#### Upload Documents")
+    st.caption("PDF · TXT · DOCX  (max 50MB each)")
 
-    uploaded_files = st.file_uploader(
+    files = st.file_uploader(
         "Choose files",
         accept_multiple_files=True,
         type=["pdf", "txt", "docx"],
         label_visibility="collapsed"
     )
 
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            # check if already uploaded
-            already_uploaded = any(
-                d["name"] == uploaded_file.name
-                for d in st.session_state.uploaded_docs
-            )
-
-            if not already_uploaded:
-                with st.spinner(f"Indexing {uploaded_file.name}..."):
-                    result = upload_document(uploaded_file)
+    if files:
+        for f in files:
+            file_key = f"{f.name}_{f.size}"
+            if file_key not in st.session_state.uploaded_files_seen:
+                with st.spinner(f"Indexing {f.name}..."):
+                    result = upload_doc(f)
 
                 if result.get("success"):
-                    st.success(
-                        f"✅ {uploaded_file.name} — "
-                        f"{result.get('chunks_created', 0)} chunks"
-                    )
-                    st.session_state.uploaded_docs.append({
-                        "name": uploaded_file.name,
-                        "chunks": result.get("chunks_created", 0),
-                        "file_id": result.get("file_id", "")
-                    })
+                    chunks = result.get("chunks_created", 0)
+                    st.success(f"✓ {f.name}  ({chunks} chunks)")
+                    st.session_state.uploaded_files_seen.add(file_key)
                 else:
-                    st.error(
-                        f"❌ {uploaded_file.name}: "
-                        f"{result.get('message', 'Upload failed')}"
-                    )
+                    msg = result.get("message", "Upload failed")
+                    st.error(f"✗ {f.name}: {msg}")
 
     st.divider()
 
     # document library
-    st.subheader("📚 Document Library")
-    docs_data = get_documents()
+    st.markdown("#### Indexed Documents")
+    docs_data = get_docs()
+    docs = docs_data.get("documents", [])
     total_chunks = docs_data.get("total_chunks", 0)
 
-    if st.session_state.uploaded_docs:
-        for doc in st.session_state.uploaded_docs:
-            st.markdown(f"📄 **{doc['name']}**")
-            st.caption(f"{doc['chunks']} chunks indexed")
+    if docs:
+        for doc in docs:
+            st.markdown(f"📄 **{doc['filename']}**")
+            st.caption(f"{doc.get('chunks', 0)} chunks")
+        st.caption(f"Total: {total_chunks} chunks across {len(docs)} files")
     else:
         st.caption("No documents uploaded yet")
-
-    if total_chunks > 0:
-        st.info(f"📊 Total chunks in store: {total_chunks}")
 
     st.divider()
 
     # controls
-    st.subheader("⚙️ Controls")
-
+    st.markdown("#### Controls")
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("🗑️ Clear Docs", use_container_width=True):
+        if st.button("Clear Docs", use_container_width=True):
             with st.spinner("Clearing..."):
-                result = clear_all_documents()
+                result = clear_docs()
             if result.get("success"):
-                st.session_state.uploaded_docs = []
-                st.success("Cleared")
+                st.session_state.uploaded_files_seen = set()
                 st.rerun()
+            else:
+                st.error(result.get("message", "Failed"))
 
     with col2:
-        if st.button("🧹 Clear Chat", use_container_width=True):
+        if st.button("Clear Chat", use_container_width=True):
             st.session_state.messages = []
-            clear_memory()
-            st.success("Cleared")
+            st.session_state.session_id = f"session_{int(time.time())}"
+            clear_mem()
             st.rerun()
 
     st.divider()
-    st.caption("Built with Haystack + Groq + Qdrant")
-
+    st.caption(f"Session: `{st.session_state.session_id[-8:]}`")
 
 # ─────────────────────────────────────────
-# MAIN CONTENT
+# MAIN AREA
 # ─────────────────────────────────────────
 
-st.title("🧠 DocMind Research Assistant")
+st.markdown("## DocMind — Research Assistant")
 st.caption(
     "Upload documents and ask questions. "
-    "The agent searches your documents, browses the web, "
-    "and shows its full reasoning."
+    "The agent searches your documents, browses the web when needed, "
+    "and shows its full reasoning trace."
 )
 
-# show info if no documents uploaded
-if not st.session_state.uploaded_docs:
-    st.info(
-        "👈 Upload documents from the sidebar to get started. "
-        "Supported formats: PDF, TXT, DOCX"
-    )
+if total_chunks == 0:
+    st.info("👈 Upload documents from the sidebar to get started.")
 
 st.divider()
 
-# ─────────────────────────────────────────
-# CHAT INTERFACE
-# ─────────────────────────────────────────
-
 # display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-        # show reasoning trace for assistant messages
-        if message["role"] == "assistant" and "trace" in message:
-            with st.expander(
-                f"🔍 Agent Reasoning ({message.get('iterations', 0)} steps)",
-                expanded=False
-            ):
-                for step in message["trace"]:
-                    step_type = step.get("type", "")
+        if msg["role"] == "assistant":
 
-                    if step_type == "thought":
-                        st.markdown(f"💭 **Thought:** {step['content']}")
-                    elif step_type == "action":
-                        tool = step.get("tool", "unknown")
-                        st.markdown(f"🔧 **Tool Used:** `{tool}`")
-                        st.caption(f"Input: {step.get('input', '')[:100]}")
-                    elif step_type == "observation":
-                        tool = step.get("tool", "unknown")
-                        st.markdown(f"👁️ **Observation from** `{tool}`:")
-                        st.code(
-                            step.get("content", "")[:300],
-                            language="text"
-                        )
+            # confidence
+            conf = msg.get("confidence", {})
+            if conf:
+                pct = conf.get("percentage", 0)
+                label = conf.get("label", "")
+                color = conf.get("color", "orange")
+                emoji = {"green": "🟢", "orange": "🟡", "red": "🔴"}.get(color, "⚪")
+                st.caption(f"{emoji} Confidence: {label} ({pct}%)")
+                if conf.get("warning"):
+                    st.warning(conf["warning"])
 
-        # show sources
-        if message["role"] == "assistant" and "sources" in message:
-            if message["sources"]:
-                with st.expander("📎 Sources", expanded=False):
-                    for source in message["sources"]:
-                        st.markdown(f"- {source}")
+            # reasoning trace
+            trace = msg.get("trace", [])
+            if trace:
+                with st.expander(f"Reasoning trace ({msg.get('iterations', 0)} steps)"):
+                    for step in trace:
+                        t = step.get("type", "")
+                        if t == "thought":
+                            st.markdown(f"💭 **Thought:** {step['content']}")
+                        elif t == "action":
+                            st.markdown(f"🔧 **Tool:** `{step.get('tool')}`")
+                            st.caption(f"Input: {step.get('input','')[:120]}")
+                        elif t == "observation":
+                            st.markdown(f"👁️ **From** `{step.get('tool')}`:")
+                            st.code(step.get("content","")[:400], language="text")
 
-        # show timing
-        if message["role"] == "assistant" and "time_taken" in message:
-            st.caption(
-                f"⏱️ {message['time_taken']}s · "
-                f"{message.get('iterations', 0)} agent iterations"
-            )
+            # sources
+            sources = msg.get("sources", [])
+            if sources:
+                with st.expander("Sources"):
+                    for src in sources:
+                        st.markdown(f"- {src}")
+
+            # timing
+            if "time_taken" in msg:
+                st.caption(
+                    f"⏱ {msg['time_taken']}s  ·  "
+                    f"{msg.get('iterations', 0)} iterations"
+                )
 
 # ─────────────────────────────────────────
-# QUESTION INPUT
+# CHAT INPUT
 # ─────────────────────────────────────────
 
-question = st.chat_input(
-    "Ask a question about your documents or anything else..."
-)
+question = st.chat_input("Ask a question about your documents...")
 
 if question:
-    # add user message to chat
+    # add user message
     st.session_state.messages.append({
         "role": "user",
         "content": question
     })
 
-    # display user message
     with st.chat_message("user"):
         st.markdown(question)
 
-    # get agent response
     with st.chat_message("assistant"):
-        with st.spinner("Agent is thinking..."):
-            start = time.time()
-            result = ask_question(question)
-            elapsed = time.time() - start
+        with st.spinner("Thinking..."):
+            result = ask(question, st.session_state.session_id)
 
         if result.get("success"):
-            answer = result.get("answer", "No answer received")
+            answer = result.get("answer", "No answer received.")
             trace = result.get("reasoning_trace", [])
             sources = result.get("sources", [])
+            conf = result.get("confidence", {})
             iterations = result.get("iterations", 0)
-            time_taken = result.get("time_taken", elapsed)
+            time_taken = result.get("time_taken", 0)
 
-            # display answer
             st.markdown(answer)
 
-            # show reasoning trace
+            # confidence
+            if conf:
+                pct = conf.get("percentage", 0)
+                label = conf.get("label", "")
+                color = conf.get("color", "orange")
+                emoji = {"green": "🟢", "orange": "🟡", "red": "🔴"}.get(color, "⚪")
+                st.caption(f"{emoji} Confidence: {label} ({pct}%)")
+                if conf.get("warning"):
+                    st.warning(conf["warning"])
+
+            # reasoning trace
             if trace:
-                with st.expander(
-                    f"🔍 Agent Reasoning ({iterations} steps)",
-                    expanded=False
-                ):
+                with st.expander(f"Reasoning trace ({iterations} steps)"):
                     for step in trace:
-                        step_type = step.get("type", "")
+                        t = step.get("type", "")
+                        if t == "thought":
+                            st.markdown(f"💭 **Thought:** {step['content']}")
+                        elif t == "action":
+                            st.markdown(f"🔧 **Tool:** `{step.get('tool')}`")
+                            st.caption(f"Input: {step.get('input','')[:120]}")
+                        elif t == "observation":
+                            st.markdown(f"👁️ **From** `{step.get('tool')}`:")
+                            st.code(step.get("content","")[:400], language="text")
 
-                        if step_type == "thought":
-                            st.markdown(
-                                f"💭 **Thought:** {step['content']}"
-                            )
-                        elif step_type == "action":
-                            tool = step.get("tool", "unknown")
-                            st.markdown(
-                                f"🔧 **Tool Used:** `{tool}`"
-                            )
-                            st.caption(
-                                f"Input: {step.get('input', '')[:100]}"
-                            )
-                        elif step_type == "observation":
-                            tool = step.get("tool", "unknown")
-                            st.markdown(
-                                f"👁️ **Observation from** `{tool}`:"
-                            )
-                            st.code(
-                                step.get("content", "")[:300],
-                                language="text"
-                            )
-
-            # show sources
+            # sources
             if sources:
-                with st.expander("📎 Sources", expanded=False):
-                    for source in sources:
-                        st.markdown(f"- {source}")
+                with st.expander("Sources"):
+                    for src in sources:
+                        st.markdown(f"- {src}")
 
-            # show confidence score
-            confidence = result.get("confidence", {})
-            if confidence:
-                pct = confidence.get("percentage", 0)
-                label = confidence.get("label", "Unknown")
-                color = confidence.get("color", "orange")
-                warning = confidence.get("warning")
-                breakdown = confidence.get("breakdown", {})
+            # timing
+            st.caption(f"⏱ {time_taken}s  ·  {iterations} iterations")
 
-                color_emoji = {
-                    "green": "🟢",
-                    "orange": "🟡",
-                    "red": "🔴"
-                }
-                emoji = color_emoji.get(color, "⚪")
-
-                st.markdown(
-                    f"{emoji} **Confidence: {label} ({pct}%)**"
-                )
-
-                with st.expander("📊 Confidence Breakdown", expanded=False):
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric(
-                            "Retrieval",
-                            f"{round(breakdown.get('retrieval_score', 0)*100)}%"
-                        )
-                    with col2:
-                        st.metric(
-                            "Grounding",
-                            f"{round(breakdown.get('coverage_score', 0)*100)}%"
-                        )
-                    with col3:
-                        st.metric(
-                            "Sources",
-                            f"{round(breakdown.get('source_agreement', 0)*100)}%"
-                        )
-
-                if warning:
-                    st.warning(warning)
-
-            # show timing
-            st.caption(
-                f"⏱️ {time_taken}s · {iterations} agent iterations"
-            )
-
-            # save to chat history
+            # save to history
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": answer,
                 "trace": trace,
                 "sources": sources,
+                "confidence": conf,
                 "iterations": iterations,
-                "time_taken": time_taken,
-                "confidence": result.get("confidence", {})
+                "time_taken": time_taken
             })
 
         else:
-            error_msg = result.get(
-                "message",
-                "Something went wrong. Please try again."
-            )
-            st.error(f"❌ {error_msg}")
+            err = result.get("message", "Something went wrong. Please try again.")
+            st.error(f"Error: {err}")
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": f"Error: {error_msg}"
+                "content": f"Error: {err}"
             })
