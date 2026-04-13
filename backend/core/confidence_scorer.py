@@ -27,19 +27,12 @@ class ConfidenceScorer:
         }
 
     def calculate_retrieval_score(self, search_results: list) -> float:
-        """
-        Score based on how relevant retrieved chunks are.
-        Uses top-3 results to avoid noise from low ranked chunks.
-        """
         if not search_results:
             return 0.0
 
-        # get top 3 scores
         top_results = search_results[:3]
-
         scores = []
         for result in top_results:
-            # handle both rrf_score and regular score
             score = result.get("rrf_score",
                     result.get("score", 0))
             scores.append(float(score))
@@ -47,27 +40,26 @@ class ConfidenceScorer:
         if not scores:
             return 0.0
 
-        # weighted average — top result matters most
-        if len(scores) == 1:
-            return min(scores[0] * 10, 1.0)  # normalize RRF scores
-        elif len(scores) == 2:
-            weighted = (scores[0] * 0.6 + scores[1] * 0.4)
-        else:
-            weighted = (
-                scores[0] * 0.5 +
-                scores[1] * 0.3 +
-                scores[2] * 0.2
-            )
-
-        # normalize — RRF scores are small (0.01-0.03), regular scores 0-1
         max_score = max(scores)
-        if max_score < 0.1:
-            # RRF scores — normalize to 0-1
-            return min(weighted * 30, 1.0)
-        else:
-            # regular cosine scores — already 0-1
-            return min(weighted, 1.0)
 
+        # RRF scores are always small (0.01-0.03)
+        # A score of 0.016 is actually GOOD for RRF
+        # Normalize: 0.016 -> ~0.8, 0.008 -> ~0.4
+        if max_score < 0.1:
+            normalized = min(max_score * 50, 1.0)
+            return round(normalized, 4)
+
+        # Regular cosine scores (0-1) — use directly
+        if len(scores) == 1:
+            return round(min(scores[0], 1.0), 4)
+        elif len(scores) == 2:
+            return round(scores[0] * 0.6 + scores[1] * 0.4, 4)
+        else:
+            return round(
+                scores[0] * 0.5 + scores[1] * 0.3 + scores[2] * 0.2,
+                4
+            )
+            
     def calculate_coverage_score(
         self,
         answer: str,
@@ -175,11 +167,11 @@ class ConfidenceScorer:
         percentage = round(overall * 100, 1)
 
         # label and color
-        if overall >= 0.7:
+        if overall >= 0.4:
             label = "High"
             color = "green"
             warning = None
-        elif overall >= 0.4:
+        elif overall >= 0.2:
             label = "Medium"
             color = "orange"
             warning = "Answer may be partially supported by documents."

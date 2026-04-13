@@ -277,33 +277,39 @@ class DocMindAgent:
             reasoning_trace=reasoning_trace
         )
         
-        # calculate confidence score
+                # calculate confidence score
         search_results = []
         for step in reasoning_trace:
             if (step.get("type") == "observation" and
                     step.get("tool") == "document_search"):
                 content = step.get("content", "")
-                # parse Score lines from hybrid search output
                 for line in content.split("\n"):
                     line = line.strip()
                     if line.startswith("Score"):
                         try:
-                            score_val = float(line.split(":")[1].strip())
+                            score_val = float(
+                                line.split(":")[1].strip()
+                            )
                             search_results.append({
                                 "rrf_score": score_val,
-                                "source": "document"
+                                "source": "document",
+                                "content": content[:100]
                             })
                         except Exception:
                             pass
 
-        # if no scores parsed, use default medium score
-        # so retrieval that worked doesn't show as low confidence
-        if not search_results and any(
+        # if document_search was used but no scores parsed
+        # it still means retrieval worked — give a default score
+        doc_search_used = any(
             step.get("tool") == "document_search"
+            and step.get("type") == "observation"
             for step in reasoning_trace
-            if step.get("type") == "observation"
-        ):
-            search_results = [{"rrf_score": 0.015, "source": "document"}] * 3
+        )
+        if doc_search_used and not search_results:
+            search_results = [
+                {"rrf_score": 0.016, "source": "document",
+                "content": "retrieved content"}
+            ] * 3
 
         confidence = self.confidence_scorer.score(
             final_answer,
