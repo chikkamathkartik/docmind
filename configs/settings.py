@@ -17,6 +17,10 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "docmind")
 
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
+LLM_PROVIDER = "ollama"
+OLLAMA_BASE_URL = "https://digit-induced-suggested-laser.trycloudflare.com"
+LLM_MODEL = "llama3.1:8b"
+
 # Embedding model config
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL",

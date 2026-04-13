@@ -1,17 +1,16 @@
 """
 DocMind RAG Agent - Improved Brain
-Implements the ReAct loop with better tool selection
-and session memory support.
 """
 
 import sys
 import os
 import time
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from configs.settings import GROQ_API_KEY, LLM_MODEL
+from configs.settings import LLM_PROVIDER, OLLAMA_BASE_URL, LLM_MODEL, GROQ_API_KEY
+
 from backend.tools.document_search import DocumentSearchTool
-from backend.tools.web_search import WebSearchTool
 from backend.tools.summarizer import SummarizerTool
 from backend.tools.answer_verifier import AnswerVerifierTool
 from backend.agents.agent_memory import memory_manager
@@ -19,68 +18,31 @@ from backend.core.confidence_scorer import ConfidenceScorer
 
 
 class DocMindAgent:
-    """
-    Improved Agentic RAG agent with session memory
-    and smarter tool selection.
-    """
 
     def __init__(self):
         print("Initializing DocMind Agent...")
 
-        # initialize tools
         self.tools = {
             "document_search": DocumentSearchTool(),
-            "web_search": WebSearchTool(),
             "summarizer": SummarizerTool(),
             "answer_verifier": AnswerVerifierTool()
         }
-        
+
         self.confidence_scorer = ConfidenceScorer()
 
-        # initialize LLM
         from groq import Groq
         self.llm = Groq(api_key=GROQ_API_KEY)
-        self.model = LLM_MODEL
 
-        # agent config
         self.max_iterations = 4
 
         print("DocMind Agent ready\n")
 
     def _get_system_prompt(self, memory_context: str = "") -> str:
-        base_prompt = """You are DocMind, an intelligent biomedical research \
-    assistant specialized in answering questions about medical research papers, \
-    clinical trials, drug information, and biomedical literature.
+        base_prompt = """You are DocMind, an intelligent biomedical research assistant.
 
-    DOMAIN: Biomedical — you answer questions about diseases, drugs, \
-    clinical trials, medical procedures, and research findings.
-
-    AVAILABLE TOOLS:
-    1. document_search - Search uploaded biomedical documents (USE FIRST)
-    2. web_search - Search the internet for medical information (USE when documents lack the answer)
-    3. summarizer - Summarize long medical texts (USE when asked to summarize)
-    4. answer_verifier - Verify medical claims against source documents (USE for important claims)
-
-    RESPONSE FORMAT - use EXACTLY one of these formats:
-
-    Format A - To use a tool:
-    THOUGHT: [your reasoning - which tool and why]
-    ACTION: [exact tool name from list above]
-    INPUT: [your search query or text]
-
-    Format B - When you have the final answer:
-    THOUGHT: [your final reasoning]
-    FINAL ANSWER: [complete answer with source citations]
-
-    BIOMEDICAL REASONING RULES:
-    - Always cite the specific document, section, or study when answering
-    - For drug information: include mechanism, dosage context if available
-    - For clinical trials: mention sample size, outcomes, and limitations if present
-    - For disease questions: include definition, symptoms, and treatment if available
-    - Never provide personal medical advice — state findings from documents only
-    - If confidence is low, explicitly say the documents do not contain sufficient information
-    - Always use document_search FIRST before web_search
-    - Be precise with medical terminology — do not simplify incorrectly"""
+Use ONLY the uploaded documents to answer.
+Always follow the ReAct format strictly.
+"""
 
         if memory_context:
             base_prompt += f"\n\n{memory_context}"
@@ -88,75 +50,93 @@ class DocMindAgent:
         return base_prompt
 
     def _parse_response(self, response: str) -> dict:
-        """Parse agent response into structured format."""
         response = response.strip()
 
         if "FINAL ANSWER:" in response:
             thought = ""
             if "THOUGHT:" in response:
-                thought = response.split("THOUGHT:")[1].split(
-                    "FINAL ANSWER:"
-                )[0].strip()
+                thought = response.split("THOUGHT:")[1].split("FINAL ANSWER:")[0].strip()
             answer = response.split("FINAL ANSWER:")[1].strip()
-            return {
-                "type": "final",
-                "thought": thought,
-                "answer": answer
-            }
+            return {"type": "final", "thought": thought, "answer": answer}
 
         if "ACTION:" in response and "INPUT:" in response:
             thought = ""
             if "THOUGHT:" in response:
-                thought = response.split("THOUGHT:")[1].split(
-                    "ACTION:"
-                )[0].strip()
-            action = response.split("ACTION:")[1].split(
-                "INPUT:"
-            )[0].strip()
+                thought = response.split("THOUGHT:")[1].split("ACTION:")[0].strip()
+            action = response.split("ACTION:")[1].split("INPUT:")[0].strip()
             input_text = response.split("INPUT:")[1].strip()
-            return {
-                "type": "action",
-                "thought": thought,
-                "action": action,
-                "input": input_text
-            }
+            return {"type": "action", "thought": thought, "action": action, "input": input_text}
 
-        # default to final answer if format not recognized
-        return {
-            "type": "final",
-            "thought": "",
-            "answer": response
-        }
+        return {"type": "final", "thought": "", "answer": response}
 
     def _execute_tool(self, tool_name: str, tool_input: str) -> str:
-        """Execute a tool and return its output."""
         tool_name = tool_name.strip().lower()
 
         if tool_name not in self.tools:
-            available = list(self.tools.keys())
-            return f"Tool '{tool_name}' not found. Available: {available}"
-
-        tool = self.tools[tool_name]
+            return f"Tool '{tool_name}' not found."
 
         try:
             if tool_name == "document_search":
-                return tool.format_for_agent(tool_input)
-            elif tool_name == "web_search":
-                return tool.format_for_agent(tool_input)
+                return self.tools[tool_name].format_for_agent(tool_input)
             elif tool_name == "summarizer":
-                return tool.format_for_agent(tool_input)
+                return self.tools[tool_name].format_for_agent(tool_input)
             elif tool_name == "answer_verifier":
-                return tool.format_for_agent(tool_input, [])
-            else:
-                return f"Tool {tool_name} execution not implemented"
+                return self.tools[tool_name].format_for_agent(tool_input, [])
         except Exception as e:
             return f"Tool error: {str(e)}"
 
+    def _call_llm(self, messages):
+        """🔥 Handles both Groq and Ollama safely"""
+
+        try:
+            # ✅ GROQ
+            if LLM_PROVIDER == "groq":
+                response = self.llm.chat.completions.create(
+                    model=LLM_MODEL,
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=600
+                )
+                return response.choices[0].message.content
+
+            # ✅ OLLAMA
+            elif LLM_PROVIDER == "ollama":
+                import requests
+
+                # convert messages → prompt
+                full_prompt = ""
+                for msg in messages:
+                    full_prompt += f"{msg['role'].upper()}: {msg['content']}\n"
+
+                response = requests.post(
+                    f"{OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": LLM_MODEL,
+                        "prompt": full_prompt,
+                        "stream": False
+                    },
+                    timeout=60
+                )
+
+                # 🔍 DEBUG (IMPORTANT)
+                print("\n=== OLLAMA DEBUG ===")
+                print("STATUS:", response.status_code)
+                print("TEXT:", response.text[:300])
+                print("====================\n")
+
+                # ✅ SAFE JSON PARSE
+                try:
+                    result = response.json()
+                    return result.get("response", "")
+                except Exception:
+                    return "ERROR"
+
+        except Exception as e:
+            print(f"LLM error: {e}")
+            return "ERROR"
+
     def run(self, question: str, session_id: str = "default") -> dict:
-        """
-        Run the agent on a question.
-        Uses session memory for conversation context.
-        """
+
         print(f"\n{'='*60}")
         print(f"Question: {question}")
         print(f"Session : {session_id}")
@@ -164,74 +144,45 @@ class DocMindAgent:
 
         start_time = time.time()
 
-        # get session memory
         session = memory_manager.get_session(session_id)
         memory_context = session.format_for_prompt(n=3)
 
-        # build messages
         messages = [
-            {
-                "role": "system",
-                "content": self._get_system_prompt(memory_context)
-            },
-            {
-                "role": "user",
-                "content": question
-            }
+            {"role": "system", "content": self._get_system_prompt(memory_context)},
+            {"role": "user", "content": question}
         ]
 
         reasoning_trace = []
         final_answer = None
-        iteration = 0
 
-        # ReAct loop
-        while iteration < self.max_iterations:
-            iteration += 1
+        for iteration in range(1, self.max_iterations + 1):
+
             print(f"--- Iteration {iteration} ---")
 
-            try:
-                response = self.llm.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.1,
-                    max_tokens=600
-                )
-                agent_output = response.choices[0].message.content
+            agent_output = self._call_llm(messages)
 
-            except Exception as e:
-                print(f"LLM error: {e}")
-                final_answer = "I encountered an error. Please try again."
+            if agent_output == "ERROR" or not agent_output:
+                final_answer = "LLM connection failed. Check ngrok/Colab."
                 break
 
             parsed = self._parse_response(agent_output)
 
-            # log thought
             if parsed["thought"]:
-                print(f"THOUGHT: {parsed['thought']}")
                 reasoning_trace.append({
                     "iteration": iteration,
                     "type": "thought",
                     "content": parsed["thought"]
                 })
 
-            # final answer
             if parsed["type"] == "final":
                 final_answer = parsed["answer"]
-                print(f"FINAL ANSWER: {final_answer[:200]}...")
-                reasoning_trace.append({
-                    "iteration": iteration,
-                    "type": "final_answer",
-                    "content": final_answer
-                })
                 break
 
-            # tool call
             if parsed["type"] == "action":
                 tool_name = parsed["action"]
                 tool_input = parsed["input"]
 
-                print(f"ACTION: {tool_name}")
-                print(f"INPUT : {tool_input[:80]}...")
+                observation = self._execute_tool(tool_name, tool_input)
 
                 reasoning_trace.append({
                     "iteration": iteration,
@@ -240,10 +191,6 @@ class DocMindAgent:
                     "input": tool_input
                 })
 
-                # execute tool
-                observation = self._execute_tool(tool_name, tool_input)
-                print(f"OBSERVATION: {observation[:150]}...\n")
-
                 reasoning_trace.append({
                     "iteration": iteration,
                     "type": "observation",
@@ -251,103 +198,22 @@ class DocMindAgent:
                     "content": observation[:500]
                 })
 
-                # add to message history
-                messages.append({
-                    "role": "assistant",
-                    "content": agent_output
-                })
-                messages.append({
-                    "role": "user",
-                    "content": f"OBSERVATION: {observation}"
-                })
+                messages.append({"role": "assistant", "content": agent_output})
+                messages.append({"role": "user", "content": f"OBSERVATION: {observation}"})
 
-        # handle max iterations
         if not final_answer:
-            final_answer = (
-                "I was unable to find a complete answer. "
-                "Please try rephrasing your question."
-            )
+            final_answer = "Could not find complete answer."
 
         elapsed = time.time() - start_time
 
-        # save to session memory
-        session.add_turn(
-            question=question,
-            answer=final_answer,
-            reasoning_trace=reasoning_trace
-        )
-        
-                # calculate confidence score
-        search_results = []
-        for step in reasoning_trace:
-            if (step.get("type") == "observation" and
-                    step.get("tool") == "document_search"):
-                content = step.get("content", "")
-                for line in content.split("\n"):
-                    line = line.strip()
-                    if line.startswith("Score"):
-                        try:
-                            score_val = float(
-                                line.split(":")[1].strip()
-                            )
-                            search_results.append({
-                                "rrf_score": score_val,
-                                "source": "document",
-                                "content": content[:100]
-                            })
-                        except Exception:
-                            pass
+        session.add_turn(question, final_answer, reasoning_trace)
 
-        # if document_search was used but no scores parsed
-        # it still means retrieval worked — give a default score
-        doc_search_used = any(
-            step.get("tool") == "document_search"
-            and step.get("type") == "observation"
-            for step in reasoning_trace
-        )
-        if doc_search_used and not search_results:
-            search_results = [
-                {"rrf_score": 0.016, "source": "document",
-                "content": "retrieved content"}
-            ] * 3
-
-        confidence = self.confidence_scorer.score(
-            final_answer,
-            search_results
-        )
+        confidence = self.confidence_scorer.score(final_answer, [])
 
         return {
             "question": question,
             "answer": final_answer,
             "reasoning_trace": reasoning_trace,
-            "iterations": iteration,
             "time_taken": round(elapsed, 2),
-            "session_id": session_id,
             "confidence": confidence
         }
-
-    def clear_memory(self, session_id: str = "default"):
-        """Clear memory for a specific session."""
-        memory_manager.clear_session(session_id)
-        print(f"Memory cleared for session: {session_id}")
-
-
-# test
-if __name__ == "__main__":
-    agent = DocMindAgent()
-
-    # test with session memory
-    session_id = "test_session"
-
-    questions = [
-        "What is Agentic RAG?",
-        "How is it different from standard RAG?",  # follow up question
-    ]
-
-    for question in questions:
-        result = agent.run(question, session_id=session_id)
-        print(f"\n{'='*60}")
-        print(f"Answer     : {result['answer'][:300]}...")
-        print(f"Iterations : {result['iterations']}")
-        print(f"Time       : {result['time_taken']}s")
-        print()
