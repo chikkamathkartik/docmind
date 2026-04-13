@@ -27,42 +27,41 @@ import time
 # Add more pairs as you test with real documents
 TEST_DATASET = [
     {
-        "question": "What is Agentic RAG?",
+        "question": "What is the AFCF framework and what problem does it solve?",
         "ground_truth": (
-            "Agentic RAG extends standard RAG by adding an autonomous "
-            "agent layer that decides which tools to use and performs "
-            "multi-step reasoning before generating a final answer."
+            "AFCF is an Anchor-based Fair Clustering Framework that solves "
+            "the scalability problem in fair clustering by reducing quadratic "
+            "or super-quadratic complexity to linear time using anchor points."
         )
     },
     {
-        "question": "What is machine learning?",
+        "question": "What are the four modules of the AFCF framework?",
         "ground_truth": (
-            "Machine learning is a subset of AI that provides systems "
-            "the ability to automatically learn and improve from "
-            "experience without being explicitly programmed."
+            "The four modules are: Fair Anchor Generation Module, "
+            "Anchor Fair Clustering Module, Fair Anchor Graph Construction Module, "
+            "and Label Propagation Module."
         )
     },
     {
-        "question": "What is natural language processing?",
+        "question": "What is the FDAS method?",
         "ground_truth": (
-            "Natural language processing is a branch of AI that helps "
-            "computers understand, interpret and manipulate human language."
+            "Fair Directly Alternate Sampling is an anchor selection strategy "
+            "that ensures demographically balanced anchor selection using "
+            "proportional quota allocation and nonlinear score decay."
         )
     },
     {
-        "question": "What is deep learning?",
+        "question": "What datasets were used in the experiments?",
         "ground_truth": (
-            "Deep learning uses neural networks with many layers to "
-            "learn representations of data with multiple levels of "
-            "abstraction."
+            "Five datasets were used: Law School, Credit Card, Bank, "
+            "Zafar, and Census II."
         )
     },
     {
-        "question": "What is retrieval augmented generation?",
+        "question": "What optimization method is used for anchor graph construction?",
         "ground_truth": (
-            "RAG is an AI framework that retrieves facts from an external "
-            "knowledge base to ground large language models on accurate "
-            "and up-to-date information."
+            "ADMM — Alternating Direction Method of Multipliers — is used "
+            "to solve the fairness-constrained anchor graph optimization problem."
         )
     }
 ]

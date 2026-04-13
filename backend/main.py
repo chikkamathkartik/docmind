@@ -99,28 +99,28 @@ async def health():
 # ─────────────────────────────────────────
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
-    """
-    Upload and index a document.
-    Accepts PDF, TXT, DOCX files.
-    """
+async def upload(file: UploadFile = File(...)):
     try:
-        # read file content
-        content = await file.read()
+        print("🚀 Upload started")
 
-        # validate file
-        validation = validate_file(file.filename, len(content))
+        contents = await file.read()
+        print("📦 File read")
+
+        from backend.utils.file_handler import validate_file, save_upload, delete_upload
+
+        validation = validate_file(file.filename, len(contents))
         if not validation["valid"]:
-            raise HTTPException(
-                status_code=400,
-                detail=validation["message"]
-            )
+            raise HTTPException(status_code=400, detail=validation["message"])
 
-        # save to disk
-        saved = save_upload(content, file.filename)
+        print("✅ File validated")
+
+        saved = save_upload(contents, file.filename)
+        print("💾 File saved:", saved["file_path"])
 
         # index into Qdrant
         result = index_document(saved["file_path"], document_store)
+
+        print("📊 INDEX RESULT:", result)
 
         if not result["success"]:
             delete_upload(saved["file_path"])
@@ -129,7 +129,6 @@ async def upload_document(file: UploadFile = File(...)):
                 detail=f"Indexing failed: {result.get('message', 'Unknown error')}"
             )
 
-        # register document
         from backend.utils.file_handler import register_document
         register_document(
             saved["file_id"],
@@ -137,19 +136,12 @@ async def upload_document(file: UploadFile = File(...)):
             result["chunks_created"]
         )
 
-        return {
-            "success": True,
-            "message": f"Successfully uploaded and indexed {file.filename}",
-            "file_id": saved["file_id"],
-            "filename": file.filename,
-            "chunks_created": result["chunks_created"],
-            "total_documents": result["total_documents"],
-            "time_taken": result["time_taken"]
-        }
+        return {"success": True}
 
-    except HTTPException:
-        raise
     except Exception as e:
+        print("❌ FULL ERROR:", str(e))
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

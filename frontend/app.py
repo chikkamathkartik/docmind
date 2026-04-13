@@ -180,22 +180,24 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
+    st.caption("Domain: Biomedical Research")
     st.caption(f"Session: `{st.session_state.session_id[-8:]}`")
-
 # ─────────────────────────────────────────
 # MAIN AREA
 # ─────────────────────────────────────────
 
-st.markdown("## DocMind — Research Assistant")
+st.markdown("## DocMind — Biomedical Research Assistant")
 st.caption(
-    "Upload documents and ask questions. "
-    "The agent searches your documents, browses the web when needed, "
-    "and shows its full reasoning trace."
+    "Upload biomedical research papers, clinical trial reports, or drug "
+    "information documents and ask questions. The agent searches your "
+    "documents, browses the web when needed, and shows its full reasoning."
 )
 
 if total_chunks == 0:
-    st.info("👈 Upload documents from the sidebar to get started.")
-
+    st.info(
+    "👈 Upload biomedical documents from the sidebar to get started. "
+    "Supported: Research papers (PDF), Clinical trial reports, Drug information (TXT/DOCX)"
+)
 st.divider()
 
 # display chat history
